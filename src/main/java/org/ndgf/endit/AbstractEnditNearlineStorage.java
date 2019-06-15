@@ -48,6 +48,7 @@ public abstract class AbstractEnditNearlineStorage extends ListeningNearlineStor
     protected volatile Path outDir;
     protected volatile Path requestDir;
     protected volatile Path trashDir;
+    protected volatile Path flushDir;
 
     public AbstractEnditNearlineStorage(String type, String name)
     {
@@ -83,10 +84,12 @@ public abstract class AbstractEnditNearlineStorage extends ListeningNearlineStor
         Path outDir = dir.resolve("out");
         Path inDir = dir.resolve("in");
         Path trashDir = dir.resolve("trash");
+        Path flushDir = dir.resolve("flush");
         checkArgument(Files.isDirectory(requestDir), requestDir + " is not a directory.");
         checkArgument(Files.isDirectory(outDir), outDir + " is not a directory.");
         checkArgument(Files.isDirectory(inDir), inDir + " is not a directory.");
         checkArgument(Files.isDirectory(trashDir), trashDir + " is not a directory.");
+        checkArgument(Files.isDirectory(flushDir), flushDir + " is not a directory.");
 
         try (DirectoryStream<Path> paths = Files.newDirectoryStream(requestDir)) {
             for (Path requestFile : paths) {
@@ -101,6 +104,15 @@ public abstract class AbstractEnditNearlineStorage extends ListeningNearlineStor
         this.outDir = outDir;
         this.inDir = inDir;
         this.trashDir = trashDir;
+        this.flushDir = flushDir;
+
+        try {
+            cleanupPath(inDir);
+            cleanupPath(outDir);
+            cleanupPath(flushDir);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -112,14 +124,14 @@ public abstract class AbstractEnditNearlineStorage extends ListeningNearlineStor
     @Override
     protected ListenableFuture<Set<URI>> flush(FlushRequest request)
     {
-        final PollingTask<Set<URI>> task = new FlushTask(request, outDir, type, name);
-        return Futures.transformAsync(request.activate(),
-                                 new AsyncFunction<Void, Set<URI>>()
+        final PollingTask<Set<URI>> task = new FlushTask(request, outDir, flushDir, type, name);
+        return Futures.transformAsync(request.activateWithPath(),
+                                 new AsyncFunction<String, Set<URI>>()
                                  {
                                      @Override
-                                     public ListenableFuture<Set<URI>> apply(Void ignored) throws Exception
+                                     public ListenableFuture<Set<URI>> apply(String path) throws Exception
                                      {
-                                         Set<URI> uris = task.start();
+                                         Set<URI> uris = task.start(path);
                                          if (uris != null) {
                                              return Futures.immediateFuture(uris);
                                          } else {
@@ -156,5 +168,15 @@ public abstract class AbstractEnditNearlineStorage extends ListeningNearlineStor
                         }
                     }
                 }, executor());
+    }
+
+    private final void cleanupPath(Path pathToClean) throws IOException {
+        try (DirectoryStream<Path> paths = Files.newDirectoryStream(pathToClean)) {
+            for (Path path : paths) {
+                Files.deleteIfExists(path);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

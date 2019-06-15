@@ -20,12 +20,11 @@
 package org.ndgf.endit;
 
 import com.google.common.base.Charsets;
-import com.sun.jna.Library;
-import com.sun.jna.Native;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Collections;
 import java.util.List;
@@ -42,12 +41,6 @@ import static java.util.Arrays.asList;
 
 class StageTask implements PollingTask<Set<Checksum>>
 {
-    public static final int ERROR_GRACE_PERIOD = 1000;
-
-    public static final int GRACE_PERIOD = 1000;
-
-    private static final int PID = CLibrary.INSTANCE.getpid();
-
     private final static Logger LOGGER = LoggerFactory.getLogger(StageTask.class);
     
     private final Path file;
@@ -55,16 +48,19 @@ class StageTask implements PollingTask<Set<Checksum>>
     private final Path errorFile;
     private final Path requestFile;
     private final long size;
+    
+    private final String pnfsid;
 
     StageTask(StageRequest request, Path requestDir, Path inDir)
     {
-        file = request.getFile().toPath();
+        file = request.getFile().toPath();  // deprecated
+        //file = Paths.get(request.getReplicaUri());  // dCache v3.0
         FileAttributes fileAttributes = request.getFileAttributes();
-        String id = fileAttributes.getPnfsId().toString();
+        pnfsid = fileAttributes.getPnfsId().toString();
         size = fileAttributes.getSize();
-        inFile = inDir.resolve(id);
-        errorFile = requestDir.resolve(id + ".err");
-        requestFile = requestDir.resolve(id);
+        inFile = inDir.resolve(pnfsid);
+        errorFile = inDir.resolve(pnfsid + ".err");
+        requestFile = requestDir.resolve(pnfsid);
     }
 
     @Override
@@ -78,12 +74,18 @@ class StageTask implements PollingTask<Set<Checksum>>
     {
         if (Files.isRegularFile(inFile) && Files.size(inFile) == size) {
             Files.move(inFile, file, StandardCopyOption.ATOMIC_MOVE);
+            LOGGER.warn("StageTask.start: found inFile and moved it to pool: {}", pnfsid);
             return Collections.emptySet();
         }
-        String s = String.format("{ \"file_size\": %d, \"parent_pid\": %d, \"time\": %d }",
-                                 size, PID, System.currentTimeMillis() / 1000);
+        String s = String.format("size=%d", size);
         Files.write(requestFile, s.getBytes(Charsets.UTF_8));
         return null;
+    }
+
+    @Override
+    public Set<Checksum> start(String ignored) throws Exception
+    {
+        return start();
     }
 
     @Override
@@ -92,23 +94,23 @@ class StageTask implements PollingTask<Set<Checksum>>
         if (Files.exists(errorFile)) {
             List<String> lines;
             try {
-                Thread.sleep(ERROR_GRACE_PERIOD);
                 lines = Files.readAllLines(errorFile, Charsets.UTF_8);
             } finally {
                 Files.deleteIfExists(inFile);
                 Files.deleteIfExists(errorFile);
                 Files.deleteIfExists(requestFile);
             }
+            LOGGER.warn("StageTask.poll: request failed: {} {}", pnfsid, lines);
             throw EnditException.create(lines);
         }
         if (Files.isRegularFile(inFile) && Files.size(inFile) == size) {            
-            Files.deleteIfExists(requestFile);            
-            Thread.sleep(GRACE_PERIOD); 
-            try {
-                Files.move(inFile, file, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-                System.err.println(e);
-            }
+            Files.deleteIfExists(requestFile);
+            //try {
+            Files.move(inFile, file, StandardCopyOption.ATOMIC_MOVE);
+            LOGGER.warn("StageTask.poll: moved inFile to pool: {}", pnfsid);
+            //} catch (IOException e) {
+            //    System.err.println(e);
+            //}
             return Collections.emptySet();
         }
         return null;
@@ -117,17 +119,12 @@ class StageTask implements PollingTask<Set<Checksum>>
     @Override
     public boolean abort() throws Exception
     {
+        LOGGER.warn("StageTask.abort: {}", pnfsid);
         if (Files.deleteIfExists(requestFile)) {
             Files.deleteIfExists(errorFile);
             Files.deleteIfExists(inFile);
             return true;
         }
         return false;
-    }
-
-    private interface CLibrary extends Library
-    {
-        CLibrary INSTANCE = (CLibrary) Native.loadLibrary("c", CLibrary.class);
-        int getpid();
     }
 }

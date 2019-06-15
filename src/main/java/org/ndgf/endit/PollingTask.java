@@ -33,6 +33,7 @@ interface PollingTask<T>
 
     /** Called to initiate the task. */
     T start() throws Exception;
+    T start(String path) throws Exception;
 
     /**
      * Called when any of the files to watch have an event occur on them.

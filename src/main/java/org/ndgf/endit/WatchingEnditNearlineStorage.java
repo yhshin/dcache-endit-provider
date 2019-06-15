@@ -37,6 +37,10 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import java.io.File;
+import java.util.Arrays;
+import java.util.Comparator;
+
 /**
  * Variant of the Endit nearline storage using a WatchService.
  */
@@ -98,9 +102,10 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
         public void run()
         {
             try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
-                outDir.register(watcher, StandardWatchEventKinds.ENTRY_DELETE);
+                outDir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE);
                 inDir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY);
-                requestDir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_DELETE);
+                //requestDir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE);
+                //flushDir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE);
 
                 pollAll();
 
@@ -109,7 +114,12 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
                     Path dir = (Path) key.watchable();
                     for (WatchEvent<?> event : key.pollEvents()) {
                         if (event.kind().equals(StandardWatchEventKinds.OVERFLOW)) {
-                            pollAll();
+                            //pollAll();
+                            LOGGER.warn("WatchTask OVFL rcvd: {} {}", dir.getFileName(), event.count());
+                            long startTime = System.currentTimeMillis();
+                            pollAllChrono();
+                            long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                            LOGGER.warn("WatchTask OVFL took {}s", elapsed); 
                         } else {
                             Path fileName = (Path) event.context();
                             poll(dir.resolve(fileName));
@@ -135,12 +145,36 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
             if (task != null) {
                 task.poll();
             }
+            else {
+                LOGGER.warn("WT.poll: Can't find the task for {}", path.toString());
+            }
         }
 
         private void pollAll()
         {
             for (TaskFuture<?> task : tasks.values()) {
                 task.poll();
+            }
+        }
+
+        private void pollAllChrono()
+        {
+            try {
+                pollDir(outDir);
+                pollDir(inDir);
+            }
+            catch (Exception e) {
+                LOGGER.warn("WT.pollAllChrono: caught exception: {}\n  Fallback to pollAll", e.toString());
+                pollAll();  // fallback to original pollAll
+            }
+        }
+
+        private void pollDir(Path dir) throws IOException 
+        {
+            File[] files = dir.toFile().listFiles();
+            Arrays.sort(files, Comparator.comparingLong(File::lastModified));
+            for (File file: files) {
+                poll(file.toPath());
             }
         }
     }

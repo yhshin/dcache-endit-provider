@@ -1,42 +1,37 @@
-dCache Endit Provider
+An Example Adaptation of dCache Endit Provider
 ==============================================
 
-This [dCache] plugin interfaces with the [Endit] TSM integration system.
+This is an example adaptation of the original [dcache-endit-provider] for a tape backend system.
+It is duplicated from the original [dcache-endit-provider] due to no intention of being merged 
+to the original project due to some differences in workflow.
 
-To compile the plugin, run:
+The following diagram shows how this plugin interacts with the tape backend system
 
-    mvn package
+![endit-tapebackend-interactions.png](endit-tapebackend-interactions.png)
 
-To install the plugin, unpack the resulting tarball in the dCache
-plugin directory (usually `/usr/local/share/dcache/plugins`).
 
-## Configuration
+As shown in the above diagram, the tape backend system has a different workflow from [Endit] for 
+flush requests.  It writes and reads files in groups so, unlike [Endit], it requires at least two 
+flush requests; the first is to register the request and it fails always, and the second is to 
+check the status.  If the file has been written to tape, on the second request, it returns on-tape 
+message to this plugin. Thus a main difference of this adapation from the original 
+[dcache-endit-provider] is the FlushTask class, which is modified to fit the workflow.
 
-To use, define a nearline storage in the dCache admin interface:
+There are some other changes from the original including the followings
 
-    hsm create osm the-hsm-name endit -directory=/path/to/endit/directory
+* using intermediate directories to hold intermediated files until they are completed
+  - this is to emulate IN_CLOSE_WRITE event
+  - these directories are used soley by the tape backend system and thus are isolated from this plugin
+  - this trick can be dropped if there is a library supporting IN_CLOSE_WRITE event
+* watch list and event types to exploit the above change
+  - error files will be created to inDir/outDir so requestDir is dropped from the watch directories list
+  - only ENTRY_CREATE event is being watched
+* excessive log messages to monitor tasks' progress
+  - log level is set to higher than 'info' to avoid logs from other parts of dcache
 
-The endit directory must be on the same file system as the pool's
-data directory.
 
-The above will create a provider that uses the JVMs file event
-notification feature which in most cases maps directly to a native
-file event notification facility of the operating system. 
+See [original README.md](README-original.md) for more information and instructions.
 
-## Polling provider
 
-To use a provider that polls for changes, use:
-
-    hsm create osm osm the-hsm-name -directory=/path/to/endit/directory
-
-This provider accepts two additional options with the following default
-values:
-
-    -threads=1
-    -period=5000
-
-The first is the number of threads used for polling for file changes
-and the second is the poll period in milliseconds.
-
-[dCache]: http://www.dcache.org/
+[dcache-endit-provider]: https://github.com/neicnordic/dcache-endit-provider
 [Endit]: https://github.com/maswan/endit
