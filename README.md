@@ -1,21 +1,14 @@
 An Example Adaptation of dCache Endit Provider
 ==============================================
 
-This is an example adaptation of the original [dcache-endit-provider] for a tape backend system.
-It is duplicated from the original [dcache-endit-provider] due to no intention of being merged 
-to the original project due to some differences in workflow.
+This is an example adaptation of the original [dcache-endit-provider] for a tape backend system. It is duplicated from the original [dcache-endit-provider] due to no intention of being merged to the original project due to some differences in workflow.
 
 The following diagram shows how this plugin interacts with the tape backend system
 
 ![endit-tapebackend-interactions.png](endit-tapebackend-interactions.png)
 
 
-As shown in the above diagram, the tape backend system has a different workflow from [Endit] for 
-flush requests.  It writes and reads files in groups so, unlike [Endit], it requires at least two 
-flush requests; the first is to register the request and it fails always, and the second is to 
-check the status.  If the file has been written to tape, on the second request, it returns on-tape 
-message to this plugin. Thus a main difference of this adapation from the original 
-[dcache-endit-provider] is the FlushTask class, which is modified to fit the workflow.
+As shown in the above diagram, the tape backend system has a different workflow from [Endit] for flush requests.  It writes and reads files in groups so, unlike [Endit], it requires at least two flush requests; the first is to register the request and it fails always, and the second is to check the status.  On the second request, it returns on-tape message to this plugin if the file has been written to tape. Thus a main difference of this adapation from the original [dcache-endit-provider] is the FlushTask class, which is modified to fit the workflow.
 
 There are some other changes from the original including the followings
 
