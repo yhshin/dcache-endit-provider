@@ -27,4 +27,4 @@ See [original README.md](README-original.md) for more information and instructio
 
 
 [dcache-endit-provider]: https://github.com/neicnordic/dcache-endit-provider
-[Endit]: https://github.com/maswan/endit
+[Endit]: https://github.com/neicnordic/endit
