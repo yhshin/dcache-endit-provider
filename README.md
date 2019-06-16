@@ -13,7 +13,7 @@ As shown in the above diagram, the tape backend system has a different workflow 
 There are some other changes from the original including the followings
 
 * using intermediate directories to hold intermediated files until they are completed
-  - this is to emulate IN_CLOSE_WRITE event
+  - this is to avoid too many MODIFY events and to ensure completeness of the files when they are appeared in the watch directories
   - these directories are used soley by the tape backend system and thus are isolated from this plugin
   - this trick can be dropped if there is a library supporting IN_CLOSE_WRITE event
 * watch list and event types to exploit the above change
