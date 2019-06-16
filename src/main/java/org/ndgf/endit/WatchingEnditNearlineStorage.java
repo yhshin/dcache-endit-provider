@@ -41,6 +41,9 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.Comparator;
 
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+
 /**
  * Variant of the Endit nearline storage using a WatchService.
  */
@@ -51,6 +54,9 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
     private final ConcurrentMap<Path,TaskFuture<?>> tasks = new ConcurrentHashMap<>();
     private final ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newCachedThreadPool());
     private Future<?> watchTask;
+
+    private Future<?> poller;
+    private final BlockingQueue<Path> eventQueue = new LinkedBlockingQueue<>();
 
     public WatchingEnditNearlineStorage(String type, String name)
     {
@@ -64,6 +70,10 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
         if (watchTask != null) {
             watchTask.cancel(true);
             watchTask = executor.submit(new WatchTask());
+        }
+        if (poller != null) {
+            poller.cancel(true);
+            poller = executor.submit(new WatchEventHandler());
         }
     }
 
@@ -85,6 +95,9 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
         if (watchTask == null) {
             watchTask = executor.submit(new WatchTask());
         }
+        if (poller == null) {
+            poller = executor.submit(new WatchEventHandler());
+        }
     }
 
     @Override
@@ -92,6 +105,9 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
     {
         if (watchTask != null) {
             watchTask.cancel(true);
+        }
+        if (poller != null) {
+            poller.cancel(true);
         }
         executor.shutdown();
     }
@@ -133,6 +149,7 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
             } catch (IOException e) {
                 LOGGER.warn("I/O error while watching Endit directories: {}", e.toString());
             } finally {
+                eventQueue.clear();
                 for (TaskFuture<?> task : tasks.values()) {
                     task.cancel(true);
                 }
@@ -141,12 +158,13 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
 
         private void poll(Path path)
         {
-            TaskFuture<?> task = tasks.get(path);
-            if (task != null) {
-                task.poll();
-            }
-            else {
-                LOGGER.warn("WT.poll: Can't find the task for {}", path.toString());
+            if (! eventQueue.contains(path)) {
+                try {
+                    eventQueue.put(path);
+                } catch (InterruptedException e) {
+                } catch (Exception e) {
+                    LOGGER.error("WatchTask.put.Exception: {} {}", path.getFileName(), e);
+                }
             }
         }
 
@@ -210,6 +228,7 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
         {
             for (Path path : task.getFilesToWatch()) {
                 tasks.remove(path, this);
+                eventQueue.remove(path);
             }
         }
 
@@ -250,6 +269,38 @@ public class WatchingEnditNearlineStorage extends AbstractEnditNearlineStorage
             }
             unregister();
             return true;
+        }
+    }
+
+    private class WatchEventHandler implements Runnable
+    {
+        @Override
+        public void run() {
+            try {
+                while (!Thread.currentThread().isInterrupted()) {
+                    Path path = eventQueue.take();
+                    LOGGER.info("EH: {}", path.getFileName());
+                    poll(path);
+                }
+            } catch (InterruptedException ignored) {
+            } catch (Exception e) {
+                LOGGER.error("EH: cought exception: {}", e);
+            } finally {
+                LOGGER.warn("EH: Finishing", name);
+                eventQueue.clear();
+            }
+        }
+
+        // copy of WatchTask.poll
+        private void poll(Path path)
+        {
+            TaskFuture<?> task = tasks.get(path);  // ConcuttentHashMap is thread-safe
+            if (task != null) {
+                task.poll();
+            }
+            else {
+                LOGGER.warn("WT.poll: Can't find the task for {}", path.toString());
+            }
         }
     }
 }
